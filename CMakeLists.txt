@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(hesai_jt128_gz_sim_plugin)
+project(isaaclab_height_scan_builder)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
