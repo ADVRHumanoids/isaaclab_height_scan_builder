@@ -1,0 +1,60 @@
+cmake_minimum_required(VERSION 3.16)
+project(hesai_jt128_gz_sim_plugin)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(ament_cmake REQUIRED)
+find_package(cppzmq REQUIRED)
+find_package(Protobuf REQUIRED)
+find_package(pcl_conversions REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(PCL REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(visualization_msgs REQUIRED)
+
+protobuf_generate_cpp(
+  PROTO_SRCS PROTO_HDRS
+  proto/point_scan_msg.proto
+  proto/height_scan_msg.proto
+)
+
+add_executable(height_scan_builder_node
+  src/main.cpp
+  src/height_scan_builder.cpp
+  ${PROTO_SRCS}
+)
+
+target_include_directories(height_scan_builder_node PRIVATE
+  ${CMAKE_CURRENT_BINARY_DIR}
+  ${PCL_INCLUDE_DIRS}
+)
+
+target_link_libraries(height_scan_builder_node
+  ${PCL_LIBRARIES}
+  cppzmq
+  protobuf::libprotobuf
+)
+
+ament_target_dependencies(height_scan_builder_node
+  pcl_conversions
+  rclcpp
+  sensor_msgs
+  tf2_ros
+  visualization_msgs
+)
+
+install(TARGETS height_scan_builder_node
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY urdf
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(DIRECTORY proto
+  DESTINATION share/${PROJECT_NAME}
+)
+
+ament_package()
