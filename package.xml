@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>hesai_jt128_gz_sim_plugin</name>
+  <name>isaaclab_height_scan_builder</name>
   <version>0.0.1</version>
-  <description>Gazebo Sim Hesai JT128-like half-sweep lidar plugin for ROS 2 PointCloud2</description>
+  <description>Height Scan builder for Isaaclab policy observation</description>
 
   <maintainer email="you@example.com">you</maintainer>
   <license>Apache-2.0</license>
