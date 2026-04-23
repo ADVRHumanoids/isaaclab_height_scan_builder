@@ -13,6 +13,7 @@ find_package(PCL REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
+find_package(message_filters REQUIRED)
 find_package(visualization_msgs REQUIRED)
 
 protobuf_generate_cpp(
@@ -65,6 +66,7 @@ ament_target_dependencies(point_cloud_manager_node
   sensor_msgs
   tf2_ros
   tf2_sensor_msgs
+  message_filters
 )
 
 install(TARGETS height_scan_builder_node point_cloud_manager_node

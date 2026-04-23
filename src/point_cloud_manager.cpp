@@ -11,59 +11,91 @@ namespace isaaclab
 PointCloudManagerNode::PointCloudManagerNode(const rclcpp::NodeOptions & options)
 : Node("point_cloud_manager", options)
 {
-  declare_parameter<std::string>("topic1", "/cloud1");
-  declare_parameter<std::string>("topic2", "/cloud2");
+  declare_parameter<std::string>("topic1", "");
+  declare_parameter<std::string>("topic2", "");
   declare_parameter<std::string>("output_topic", "/cloud_merged");
   declare_parameter<std::string>("target_frame", "base_link");
   declare_parameter<float>("voxel_leaf_size", 0.05f);
   declare_parameter<float>("box_x", 2.0f);
   declare_parameter<float>("box_y", 1.5f);
+  declare_parameter<int>("sync_queue_size", 10);
+  declare_parameter<double>("sync_slop", 0.1);
 
-  const auto topic1     = get_parameter("topic1").as_string();
-  const auto topic2     = get_parameter("topic2").as_string();
-  const auto out_topic  = get_parameter("output_topic").as_string();
-  target_frame_         = get_parameter("target_frame").as_string();
-  voxel_leaf_size_      = static_cast<float>(get_parameter("voxel_leaf_size").as_double());
-  box_x_                = static_cast<float>(get_parameter("box_x").as_double());
-  box_y_                = static_cast<float>(get_parameter("box_y").as_double());
+  const auto topic1      = get_parameter("topic1").as_string();
+  const auto topic2      = get_parameter("topic2").as_string();
+  std::string out_topic  = get_parameter("output_topic").as_string();
+  target_frame_          = get_parameter("target_frame").as_string();
+  voxel_leaf_size_       = static_cast<float>(get_parameter("voxel_leaf_size").as_double());
+  box_x_                 = static_cast<float>(get_parameter("box_x").as_double());
+  box_y_                 = static_cast<float>(get_parameter("box_y").as_double());
+  const int queue_size   = get_parameter("sync_queue_size").as_int();
+  const double slop      = get_parameter("sync_slop").as_double();
 
   tf_buffer_   = std::make_shared<tf2_ros::Buffer>(get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
   auto qos = rclcpp::SensorDataQoS();
 
-  sub1_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-    topic1, qos,
-    [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr & msg) {
-      latest1_ = msg;
-      process();
-    });
+  if (topic1.empty()) {
+    RCLCPP_ERROR(get_logger(), "Parameter 'topic1' must be a non-empty topic name.");
+    throw std::runtime_error("Invalid parameter: topic1 is empty");
+  }
 
-  sub2_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-    topic2, qos,
-    [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr & msg) {
-      latest2_ = msg;
-      process();
-    });
+  if (!topic2.empty()) {
+    std::cout << "SUBSCRIBING TO TWO TOPICS: " << topic1 << " AND " << topic2 << std::endl;
+    sub1_.subscribe(this, topic1, qos.get_rmw_qos_profile());
+    sub2_.subscribe(this, topic2, qos.get_rmw_qos_profile());
 
-  pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(out_topic, rclcpp::SensorDataQoS());
+    sync_ = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(
+      SyncPolicy(queue_size), sub1_, sub2_);
+    sync_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(slop));
+    sync_->registerCallback(&PointCloudManagerNode::syncCallback, this);
+  } else {
+    std::cout << "SUBSCRIBING TO SINGLE TOPIC: " << topic1 << std::endl;
+    single_sub_ = create_subscription<Cloud2>(
+      topic1, qos,
+      std::bind(&PointCloudManagerNode::singleTopicCallback, this, std::placeholders::_1));
+  }
 
-  RCLCPP_INFO(get_logger(), "PointCloudManagerNode ready.");
+  pub_ = create_publisher<Cloud2>(out_topic, rclcpp::SensorDataQoS());
+
+  RCLCPP_INFO(
+    get_logger(), "PointCloudManagerNode ready (%s).",
+    topic2.empty() ? "single-topic mode" : "ApproximateTimeSynchronizer");
   RCLCPP_INFO(get_logger(), "  topic1: %s", topic1.c_str());
   RCLCPP_INFO(get_logger(), "  topic2: %s", topic2.c_str());
   RCLCPP_INFO(get_logger(), "  output: %s", out_topic.c_str());
   RCLCPP_INFO(get_logger(), "  target_frame: %s", target_frame_.c_str());
   RCLCPP_INFO(get_logger(), "  voxel_leaf: %.3f m", voxel_leaf_size_);
   RCLCPP_INFO(get_logger(), "  box_x: %.2f m  box_y: %.2f m", box_x_, box_y_);
+  if (!topic2.empty()) {
+    RCLCPP_INFO(get_logger(), "  sync slop: %.3f s  queue: %d", slop, queue_size);
+  }
+}
+
+void PointCloudManagerNode::singleTopicCallback(const Cloud2::ConstSharedPtr & msg)
+{
+  pcl::PointCloud<pcl::PointXYZ> cloud;
+  if (!transformCloud(msg, cloud)) {
+    return;
+  }
+
+  pcl::PointCloud<pcl::PointXYZ> filtered;
+  filterCloud(cloud, filtered);
+
+  Cloud2 out_msg;
+  pcl::toROSMsg(filtered, out_msg);
+  out_msg.header.frame_id = target_frame_;
+  out_msg.header.stamp = msg->header.stamp;
+  pub_->publish(out_msg);
 }
 
 bool PointCloudManagerNode::transformCloud(
-  const sensor_msgs::msg::PointCloud2::ConstSharedPtr & msg,
+  const Cloud2::ConstSharedPtr & msg,
   pcl::PointCloud<pcl::PointXYZ> & out) const
 {
   sensor_msgs::msg::PointCloud2 transformed_msg;
   try {
-    // Use latest available transform; robust against sim-time jumps
     const auto tf = tf_buffer_->lookupTransform(
       target_frame_, msg->header.frame_id,
       rclcpp::Time(0, 0, get_clock()->get_clock_type()),
@@ -79,15 +111,13 @@ bool PointCloudManagerNode::transformCloud(
   return true;
 }
 
-void PointCloudManagerNode::process()
+void PointCloudManagerNode::syncCallback(
+  const Cloud2::ConstSharedPtr & msg1,
+  const Cloud2::ConstSharedPtr & msg2)
 {
-  if (!latest1_ || !latest2_) {
-    return;
-  }
-
   // --- Transform both clouds to target_frame ---
   pcl::PointCloud<pcl::PointXYZ> cloud1, cloud2;
-  if (!transformCloud(latest1_, cloud1) || !transformCloud(latest2_, cloud2)) {
+  if (!transformCloud(msg1, cloud1) || !transformCloud(msg2, cloud2)) {
     return;
   }
 
@@ -96,29 +126,39 @@ void PointCloudManagerNode::process()
   merged = cloud1;
   merged += cloud2;
 
+  // Filter cloud
+  pcl::PointCloud<pcl::PointXYZ> filtered;
+  filterCloud(merged, filtered);
+
+  // --- Publish with synchronized stamp ---
+  Cloud2 out_msg;
+  pcl::toROSMsg(filtered, out_msg);
+  out_msg.header.frame_id = target_frame_;
+  out_msg.header.stamp    = msg1->header.stamp;  // synchronized timestamp
+  pub_->publish(out_msg);
+}
+
+void PointCloudManagerNode::filterCloud(
+  const pcl::PointCloud<pcl::PointXYZ> & in,
+  pcl::PointCloud<pcl::PointXYZ> & out) const
+{
   // --- Box filter: keep points inside [-box_x/2, box_x/2] x [-box_y/2, box_y/2] ---
   {
     pcl::CropBox<pcl::PointXYZ> crop;
-    crop.setInputCloud(merged.makeShared());
+    crop.setInputCloud(in.makeShared());
     crop.setMin(Eigen::Vector4f(-box_x_ / 2.0f, -box_y_ / 2.0f, -std::numeric_limits<float>::max(), 1.0f));
     crop.setMax(Eigen::Vector4f( box_x_ / 2.0f,  box_y_ / 2.0f,  std::numeric_limits<float>::max(), 1.0f));
-    crop.filter(merged);
+    crop.filter(out);
   }
 
   // --- Voxel downsampling ---
   {
     pcl::VoxelGrid<pcl::PointXYZ> voxel;
-    voxel.setInputCloud(merged.makeShared());
+    voxel.setInputCloud(out.makeShared());
     voxel.setLeafSize(voxel_leaf_size_, voxel_leaf_size_, voxel_leaf_size_);
-    voxel.filter(merged);
+    voxel.filter(out);
   }
 
-  // --- Publish ---
-  sensor_msgs::msg::PointCloud2 out_msg;
-  pcl::toROSMsg(merged, out_msg);
-  out_msg.header.frame_id = target_frame_;
-  out_msg.header.stamp    = get_clock()->now();
-  pub_->publish(out_msg);
 }
 
 }  // namespace isaaclab
@@ -130,3 +170,4 @@ int main(int argc, char ** argv)
   rclcpp::shutdown();
   return 0;
 }
+
