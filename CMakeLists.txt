@@ -12,6 +12,7 @@ find_package(rclcpp REQUIRED)
 find_package(PCL REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(tf2_sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 
 protobuf_generate_cpp(
@@ -45,7 +46,28 @@ ament_target_dependencies(height_scan_builder_node
   visualization_msgs
 )
 
-install(TARGETS height_scan_builder_node
+add_executable(point_cloud_manager_node
+  src/point_cloud_manager.cpp
+)
+
+target_include_directories(point_cloud_manager_node PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${PCL_INCLUDE_DIRS}
+)
+
+target_link_libraries(point_cloud_manager_node
+  ${PCL_LIBRARIES}
+)
+
+ament_target_dependencies(point_cloud_manager_node
+  pcl_conversions
+  rclcpp
+  sensor_msgs
+  tf2_ros
+  tf2_sensor_msgs
+)
+
+install(TARGETS height_scan_builder_node point_cloud_manager_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 

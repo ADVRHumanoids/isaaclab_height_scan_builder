@@ -175,14 +175,15 @@ void HeightScanBuilder::buildHeightScan()
                 PointScan * pointScan = scan.add_points();
                 pointScan->set_x(x);
                 pointScan->set_y(y);
-                pointScan->set_z(5.0F); // No point found, set to a default high value
-                continue;
+                pointScan->set_z(5.0); // No point found, set to a default high value
             }
-
-            PointScan * pointScan = scan.add_points();
-            pointScan->set_x(x);
-            pointScan->set_y(y);
-            pointScan->set_z(cloud->points[maxZIdx].z);
+            else
+            {
+                PointScan * pointScan = scan.add_points();
+                pointScan->set_x(x);
+                pointScan->set_y(y);
+                pointScan->set_z(cloud->points[maxZIdx].z);
+            }
         }
     }
 
