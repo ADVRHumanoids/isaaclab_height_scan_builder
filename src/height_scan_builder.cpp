@@ -155,6 +155,10 @@ void HeightScanBuilder::buildHeightScan()
                     indices,
                     squaredDistances) == 0)
             {
+                PointScan * pointScan = scan.add_points();
+                pointScan->set_x(x);
+                pointScan->set_y(y);
+                pointScan->set_z(5.0); // No point found, set to a default high value
                 continue;
             }
 
@@ -186,6 +190,7 @@ void HeightScanBuilder::buildHeightScan()
             }
         }
     }
+    std::cout << "Built height scan with " << scan.points_size() << " points" << std::endl;
     this->publishScan(scan);
     this->publishMarkers(scan);
 }
