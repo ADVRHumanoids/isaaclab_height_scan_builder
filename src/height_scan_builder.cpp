@@ -25,7 +25,7 @@ HeightScanBuilder::HeightScanBuilder(const rclcpp::NodeOptions & options)
     this->_height_scan_cfg.height = this->declare_parameter<double>("height", 1.6);
     this->_height_scan_cfg.resolution = this->declare_parameter<double>("resolution", 0.1);
     this->_target_frame = this->declare_parameter<std::string>("target_frame", "base_link");
-    this->_loop_rate_hz = this->declare_parameter<double>("loop_rate_hz", 10.0);
+    this->_loop_rate_hz = this->declare_parameter<double>("loop_rate_hz", 30.0);
 
     this->_tf_buffer = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     this->_tf_listener = std::make_shared<tf2_ros::TransformListener>(*this->_tf_buffer);
@@ -86,7 +86,6 @@ void HeightScanBuilder::cloudCallback(const sensor_msgs::msg::PointCloud2::Share
         const Eigen::Affine3f eigenTransform = translation * rotation;
 
         pcl::transformPointCloud(*sourceCloud, *cloud, eigenTransform);
-        stampNs = rclcpp::Time(transform.header.stamp).nanoseconds();
     }
     catch (const tf2::TransformException & ex)
     {
@@ -108,11 +107,16 @@ void HeightScanBuilder::cloudCallback(const sensor_msgs::msg::PointCloud2::Share
         xyCloud->push_back(pcl::PointXYZ(point.x, point.y, 0.0F));
     }
 
-    std::lock_guard<std::mutex> lock(this->_cloud_mutex);
-    this->_cloud = std::move(cloud);
-    this->_xy_cloud = std::move(xyCloud);
-    this->_stamp_ns = stampNs;
-    this->_frame_id = this->_target_frame;
+    {
+        std::lock_guard<std::mutex> lock(this->_cloud_mutex);
+        this->_cloud = std::move(cloud);
+        this->_xy_cloud = std::move(xyCloud);
+        this->_stamp_ns = stampNs;
+        this->_frame_id = this->_target_frame;
+    }
+
+    // Build and publish right after receiving a cloud to reduce scheduling latency.
+    this->buildHeightScan();
 }
 
 void HeightScanBuilder::buildHeightScan()
@@ -190,8 +194,7 @@ void HeightScanBuilder::buildHeightScan()
             }
         }
     }
-    std::cout << "Built height scan with " << scan.points_size() << " points" << std::endl;
-    this->publishScan(scan);
+    // this->publishScan(scan);
     this->publishMarkers(scan);
 }
 
