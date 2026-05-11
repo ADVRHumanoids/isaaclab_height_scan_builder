@@ -35,7 +35,13 @@ private:
 
   bool transformCloud(
     const Cloud2::ConstSharedPtr & msg,
+    const std::string & to_frame,
     pcl::PointCloud<pcl::PointXYZ> & out) const;
+
+  bool transformCloud(
+    const Cloud2 & in,
+    const std::string & to_frame,
+    Cloud2 & out) const;
 
   void filterCloud(
     const pcl::PointCloud<pcl::PointXYZ> & in,
@@ -57,6 +63,7 @@ private:
   rclcpp::Publisher<Cloud2>::SharedPtr pub_;
 
   // Parameters
+  std::string filter_frame_;
   std::string target_frame_;
   float voxel_leaf_size_;
   float box_x_;

@@ -14,6 +14,7 @@ PointCloudManagerNode::PointCloudManagerNode(const rclcpp::NodeOptions & options
   declare_parameter<std::string>("topic1", "");
   declare_parameter<std::string>("topic2", "");
   declare_parameter<std::string>("output_topic", "/cloud_merged");
+  declare_parameter<std::string>("filter_frame", "base_link");
   declare_parameter<std::string>("target_frame", "base_link");
   declare_parameter<float>("voxel_leaf_size", 0.05f);
   declare_parameter<float>("box_x", 2.0f);
@@ -24,6 +25,7 @@ PointCloudManagerNode::PointCloudManagerNode(const rclcpp::NodeOptions & options
   const auto topic1      = get_parameter("topic1").as_string();
   const auto topic2      = get_parameter("topic2").as_string();
   std::string out_topic  = get_parameter("output_topic").as_string();
+  filter_frame_          = get_parameter("filter_frame").as_string();
   target_frame_          = get_parameter("target_frame").as_string();
   voxel_leaf_size_       = static_cast<float>(get_parameter("voxel_leaf_size").as_double());
   box_x_                 = static_cast<float>(get_parameter("box_x").as_double());
@@ -65,6 +67,7 @@ PointCloudManagerNode::PointCloudManagerNode(const rclcpp::NodeOptions & options
   RCLCPP_INFO(get_logger(), "  topic1: %s", topic1.c_str());
   RCLCPP_INFO(get_logger(), "  topic2: %s", topic2.c_str());
   RCLCPP_INFO(get_logger(), "  output: %s", out_topic.c_str());
+  RCLCPP_INFO(get_logger(), "  filter_frame: %s", filter_frame_.c_str());
   RCLCPP_INFO(get_logger(), "  target_frame: %s", target_frame_.c_str());
   RCLCPP_INFO(get_logger(), "  voxel_leaf: %.3f m", voxel_leaf_size_);
   RCLCPP_INFO(get_logger(), "  box_x: %.2f m  box_y: %.2f m", box_x_, box_y_);
@@ -76,38 +79,62 @@ PointCloudManagerNode::PointCloudManagerNode(const rclcpp::NodeOptions & options
 void PointCloudManagerNode::singleTopicCallback(const Cloud2::ConstSharedPtr & msg)
 {
   pcl::PointCloud<pcl::PointXYZ> cloud;
-  if (!transformCloud(msg, cloud)) {
+  if (!transformCloud(msg, filter_frame_, cloud)) {
     return;
   }
 
   pcl::PointCloud<pcl::PointXYZ> filtered;
   filterCloud(cloud, filtered);
 
+  Cloud2 filtered_msg;
+  pcl::toROSMsg(filtered, filtered_msg);
+  filtered_msg.header.frame_id = filter_frame_;
+  filtered_msg.header.stamp = msg->header.stamp;
+
+  if (filter_frame_ == target_frame_) {
+    pub_->publish(filtered_msg);
+    return;
+  }
+
   Cloud2 out_msg;
-  pcl::toROSMsg(filtered, out_msg);
-  out_msg.header.frame_id = target_frame_;
+  if (!transformCloud(filtered_msg, target_frame_, out_msg)) {
+    return;
+  }
   out_msg.header.stamp = msg->header.stamp;
   pub_->publish(out_msg);
 }
 
 bool PointCloudManagerNode::transformCloud(
   const Cloud2::ConstSharedPtr & msg,
+  const std::string & to_frame,
   pcl::PointCloud<pcl::PointXYZ> & out) const
 {
   sensor_msgs::msg::PointCloud2 transformed_msg;
-  try {
-    const auto tf = tf_buffer_->lookupTransform(
-      target_frame_, msg->header.frame_id,
-      rclcpp::Time(0, 0, get_clock()->get_clock_type()),
-      rclcpp::Duration(std::chrono::milliseconds(100)));
-    tf2::doTransform(*msg, transformed_msg, tf);
-  } catch (const tf2::TransformException & ex) {
-    RCLCPP_WARN_THROTTLE(
-      get_logger(), *get_clock(), 2000,
-      "Transform to '%s' failed: %s", target_frame_.c_str(), ex.what());
+  if (!transformCloud(*msg, to_frame, transformed_msg)) {
     return false;
   }
   pcl::fromROSMsg(transformed_msg, out);
+  return true;
+}
+
+bool PointCloudManagerNode::transformCloud(
+  const Cloud2 & in,
+  const std::string & to_frame,
+  Cloud2 & out) const
+{
+  try {
+    const auto tf = tf_buffer_->lookupTransform(
+      to_frame, in.header.frame_id,
+      rclcpp::Time(0, 0, get_clock()->get_clock_type()),
+      rclcpp::Duration(std::chrono::milliseconds(100)));
+    tf2::doTransform(in, out, tf);
+  } catch (const tf2::TransformException & ex) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "Transform from '%s' to '%s' failed: %s", in.header.frame_id.c_str(), to_frame.c_str(), ex.what());
+    return false;
+  }
+
   return true;
 }
 
@@ -115,9 +142,9 @@ void PointCloudManagerNode::syncCallback(
   const Cloud2::ConstSharedPtr & msg1,
   const Cloud2::ConstSharedPtr & msg2)
 {
-  // --- Transform both clouds to target_frame ---
+  // --- Transform both clouds to filter_frame ---
   pcl::PointCloud<pcl::PointXYZ> cloud1, cloud2;
-  if (!transformCloud(msg1, cloud1) || !transformCloud(msg2, cloud2)) {
+  if (!transformCloud(msg1, filter_frame_, cloud1) || !transformCloud(msg2, filter_frame_, cloud2)) {
     return;
   }
 
@@ -131,10 +158,21 @@ void PointCloudManagerNode::syncCallback(
   filterCloud(merged, filtered);
 
   // --- Publish with synchronized stamp ---
+  Cloud2 filtered_msg;
+  pcl::toROSMsg(filtered, filtered_msg);
+  filtered_msg.header.frame_id = filter_frame_;
+  filtered_msg.header.stamp    = msg1->header.stamp;  // synchronized timestamp
+
+  if (filter_frame_ == target_frame_) {
+    pub_->publish(filtered_msg);
+    return;
+  }
+
   Cloud2 out_msg;
-  pcl::toROSMsg(filtered, out_msg);
-  out_msg.header.frame_id = target_frame_;
-  out_msg.header.stamp    = msg1->header.stamp;  // synchronized timestamp
+  if (!transformCloud(filtered_msg, target_frame_, out_msg)) {
+    return;
+  }
+  out_msg.header.stamp = msg1->header.stamp;
   pub_->publish(out_msg);
 }
 
