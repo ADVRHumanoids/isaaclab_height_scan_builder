@@ -43,10 +43,10 @@ ImuWorldFramePublisherNode::ImuWorldFramePublisherNode(const rclcpp::NodeOptions
     const Eigen::Quaterniond b_q_imu(q.w, q.x, q.y, q.z);
     
     // Apply RPY offset (π/2, 0, 0) to the reference orientation
-    const Eigen::AngleAxisd offset_angle_axis(M_PI, Eigen::Vector3d::UnitX());
-    const Eigen::Quaterniond q_offset(offset_angle_axis);
+    // const Eigen::AngleAxisd offset_angle_axis(M_PI, Eigen::Vector3d::UnitX());
+    // const Eigen::Quaterniond q_offset(offset_angle_axis);
     
-    q_w_imu_ref_ = (b_q_imu * q_offset).normalized();
+    q_w_imu_ref_ = b_q_imu; //* q_offset).normalized();
     has_reference_orientation_ = true;
   } catch (const tf2::TransformException & ex) {
     RCLCPP_ERROR(get_logger(), "Failed to get %s <- %s transform: %s", base_link_.c_str(), imu_frame_.c_str(), ex.what());
@@ -73,10 +73,13 @@ void ImuWorldFramePublisherNode::imuCallback(const sensor_msgs::msg::Imu::Shared
     return;
   }
 
-  const Eigen::Quaterniond q_curr = w_q_imu.normalized();
+  const Eigen::Quaterniond imu_read = w_q_imu.normalized();
+  const Eigen::AngleAxisd offset_angle_axis(M_PI, Eigen::Vector3d::UnitX());
+  const Eigen::Quaterniond q_offset(offset_angle_axis);
+  const Eigen::Quaterniond q_curr = (imu_read * q_offset).normalized();
 
   // Delta rotation from IMU relative to static reference transform.
-  const Eigen::Quaterniond q_delta = q_w_imu_ref_ * q_curr.conjugate();
+  const Eigen::Quaterniond q_delta = q_w_imu_ref_ * q_curr;
 
   tf2::Quaternion tf_q(q_delta.x(), q_delta.y(), q_delta.z(), q_delta.w());
   tf_q.normalize();
