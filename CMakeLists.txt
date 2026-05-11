@@ -11,8 +11,10 @@ find_package(pcl_conversions REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(PCL REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(visualization_msgs REQUIRED)
 
@@ -51,6 +53,10 @@ add_executable(point_cloud_manager_node
   src/point_cloud_manager.cpp
 )
 
+add_executable(imu_world_frame_publisher_node
+  src/imu_world_frame_publisher.cpp
+)
+
 target_include_directories(point_cloud_manager_node PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${PCL_INCLUDE_DIRS}
@@ -60,16 +66,29 @@ target_link_libraries(point_cloud_manager_node
   ${PCL_LIBRARIES}
 )
 
+target_link_libraries(imu_world_frame_publisher_node
+  ${PCL_LIBRARIES}
+)
+
 ament_target_dependencies(point_cloud_manager_node
   pcl_conversions
   rclcpp
   sensor_msgs
+  tf2
   tf2_ros
   tf2_sensor_msgs
   message_filters
 )
 
-install(TARGETS height_scan_builder_node point_cloud_manager_node
+ament_target_dependencies(imu_world_frame_publisher_node
+  rclcpp
+  sensor_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+install(TARGETS height_scan_builder_node point_cloud_manager_node imu_world_frame_publisher_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
